@@ -17,6 +17,7 @@ import (
 type Hpa struct {
 	Minimum    string            `aliases:"min" help:"Set minimum to this number"`
 	Maximum    string            `aliases:"max" help:"Set maximum to this number"`
+	CPUTarget  int               `aliases:"cpu" help:"Set scaling target"`
 	Kubeconfig string            `help:"Path to the kubeconfig file" type:"path" default:"~/.kube/config"`
 	Namespace  string            `short:"n" help:"Namespace to modify HPAs in"`
 	Context    string            `help:"Context to use in kubeconfig"`
@@ -135,6 +136,12 @@ var (
 func (program *Hpa) getStrategy() (strategy, error) {
 
 	switch {
+	case program.CPUTarget > 0:
+		return func(hpa *v1.HorizontalPodAutoscaler) error {
+			*hpa.Spec.TargetCPUUtilizationPercentage = int32(program.CPUTarget)
+			return nil
+		}, nil
+
 	case Number.MatchString(program.Minimum):
 		if num, err := strconv.Atoi(program.Minimum); err != nil {
 			return nil, err
