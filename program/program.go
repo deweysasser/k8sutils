@@ -17,8 +17,10 @@ type Options struct {
 	// VersionCmd VersionCmd `name:"version" cmd:"" help:"show program version"`
 
 	Debug        bool   `group:"Info" help:"Show debugging information"`
+	DryRun       bool   `group:"Info" help:"Do not modify anything"`
 	OutputFormat string `group:"Info" enum:"auto,jsonl,terminal" default:"auto" help:"How to show program output (auto|terminal|jsonl)"`
 	Quiet        bool   `group:"Info" help:"Be less verbose than usual"`
+	Hpa          Hpa    `cmd`
 }
 
 // Parse calls the CLI parsing routines
