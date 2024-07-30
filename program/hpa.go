@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/rs/zerolog/log"
 	v1 "k8s.io/api/autoscaling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"math"
+	"os"
 	"regexp"
 	"strconv"
 )
@@ -18,6 +20,7 @@ type Hpa struct {
 	Minimum    string            `aliases:"min" help:"Set minimum to this number"`
 	Maximum    string            `aliases:"max" help:"Set maximum to this number"`
 	CPUTarget  int               `aliases:"cpu" help:"Set scaling target"`
+	Info       bool              `help:"Show information about the HPAs"`
 	Kubeconfig string            `help:"Path to the kubeconfig file" type:"path" default:"~/.kube/config"`
 	Namespace  string            `short:"n" help:"Namespace to modify HPAs in"`
 	Context    string            `help:"Context to use in kubeconfig"`
@@ -32,7 +35,9 @@ func (program *Hpa) Run(options *Options) error {
 
 	if !program.All && len(program.HPAList) == 0 && len(program.Labels) == 0 {
 
-		return errors.New("no HPAs selected")
+		if !program.Info {
+			return errors.New("no HPAs selected")
+		}
 	}
 
 	// Set up Kubernetes client
@@ -53,11 +58,11 @@ func (program *Hpa) Run(options *Options) error {
 			panic(err.Error())
 		}
 
-		context := config.Contexts[config.CurrentContext]
-		if context.Namespace == "" {
+		k8sContext := config.Contexts[config.CurrentContext]
+		if k8sContext.Namespace == "" {
 			panic("Namespace is not set in the current context and no namespace flag provided")
 		}
-		program.Namespace = context.Namespace
+		program.Namespace = k8sContext.Namespace
 	}
 
 	ctx := context.WithValue(context.Background(), "options", options)
@@ -68,6 +73,42 @@ func (program *Hpa) Run(options *Options) error {
 		return err
 	}
 
+	if program.Info {
+		// NAME                      REFERENCE                            TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+		// Example:
+		// test-hpa                  Deployment/test                      26%/45%   4         100       9          60d
+
+		t := table.NewWriter()
+		t.SetOutputMirror(os.Stdout)
+		t.SetStyle(table.StyleLight)
+		t.Style().Options.DrawBorder = false
+		t.Style().Options.SeparateRows = false
+		t.Style().Options.SeparateColumns = false
+		t.Style().Options.SeparateHeader = false
+
+		t.AppendHeader(table.Row{"NAME", "REFERENCE", "TARGETS", "CPU", "MINPODS", "MIN%", "MAXPODS", "REPLICAS", "REP%"})
+		for _, hpa := range hpas {
+			t.AppendRow(table.Row{
+				hpa.Name,
+				hpa.Name,
+				hpa.Spec.ScaleTargetRef.Kind + "/" + hpa.Spec.ScaleTargetRef.Name,
+				fmt.Sprintf("%2d%%/%2d%%",
+					*hpa.Status.CurrentCPUUtilizationPercentage,
+					*hpa.Spec.TargetCPUUtilizationPercentage),
+				*hpa.Spec.MinReplicas,
+				fmt.Sprintf("%3d%%",
+					int(float64(*hpa.Spec.MinReplicas)/float64(hpa.Spec.MaxReplicas)*100)),
+				hpa.Spec.MaxReplicas,
+				hpa.Status.CurrentReplicas,
+				fmt.Sprintf("%3d%%",
+					int(float64(hpa.Status.CurrentReplicas)/float64(hpa.Spec.MaxReplicas)*100)),
+			})
+
+		}
+		t.Render()
+		return nil
+	}
+
 	cal, err := program.getStrategy()
 
 	if err != nil {
@@ -75,6 +116,7 @@ func (program *Hpa) Run(options *Options) error {
 	}
 
 	var listErrors []error
+
 	for _, hpa := range hpas {
 		err := modifyHPA(ctx, &hpa,
 			cal,
