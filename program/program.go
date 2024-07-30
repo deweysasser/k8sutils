@@ -20,7 +20,7 @@ type Options struct {
 	DryRun       bool   `group:"Info" help:"Do not modify anything"`
 	OutputFormat string `group:"Info" enum:"auto,jsonl,terminal" default:"auto" help:"How to show program output (auto|terminal|jsonl)"`
 	Quiet        bool   `group:"Info" help:"Be less verbose than usual"`
-	Hpa          Hpa    `cmd`
+	Hpa          Hpa    `cmd:"" help:"Horizontal Pod Autoscaler operations"`
 }
 
 // Parse calls the CLI parsing routines
