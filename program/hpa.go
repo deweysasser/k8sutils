@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type Hpa struct {
@@ -34,10 +35,7 @@ type strategy func(hpa *v1.HorizontalPodAutoscaler) error
 func (program *Hpa) Run(options *Options) error {
 
 	if !program.All && len(program.HPAList) == 0 && len(program.Labels) == 0 {
-
-		if !program.Info {
-			return errors.New("no HPAs selected")
-		}
+		program.Info = true
 	}
 
 	// Set up Kubernetes client
@@ -78,34 +76,7 @@ func (program *Hpa) Run(options *Options) error {
 		// Example:
 		// test-hpa                  Deployment/test                      26%/45%   4         100       9          60d
 
-		t := table.NewWriter()
-		t.SetOutputMirror(os.Stdout)
-		t.SetStyle(table.StyleLight)
-		t.Style().Options.DrawBorder = false
-		t.Style().Options.SeparateRows = false
-		t.Style().Options.SeparateColumns = false
-		t.Style().Options.SeparateHeader = false
-
-		t.AppendHeader(table.Row{"NAME", "REFERENCE", "TARGETS", "CPU", "MINPODS", "MIN%", "MAXPODS", "REPLICAS", "REP%"})
-		for _, hpa := range hpas {
-			t.AppendRow(table.Row{
-				hpa.Name,
-				hpa.Name,
-				hpa.Spec.ScaleTargetRef.Kind + "/" + hpa.Spec.ScaleTargetRef.Name,
-				fmt.Sprintf("%2d%%/%2d%%",
-					*hpa.Status.CurrentCPUUtilizationPercentage,
-					*hpa.Spec.TargetCPUUtilizationPercentage),
-				*hpa.Spec.MinReplicas,
-				fmt.Sprintf("%3d%%",
-					int(float64(*hpa.Spec.MinReplicas)/float64(hpa.Spec.MaxReplicas)*100)),
-				hpa.Spec.MaxReplicas,
-				hpa.Status.CurrentReplicas,
-				fmt.Sprintf("%3d%%",
-					int(float64(hpa.Status.CurrentReplicas)/float64(hpa.Spec.MaxReplicas)*100)),
-			})
-
-		}
-		t.Render()
+		program.printHPAs(hpas)
 		return nil
 	}
 
@@ -123,6 +94,7 @@ func (program *Hpa) Run(options *Options) error {
 			clientset, program.Namespace)
 
 		listErrors = append(listErrors, err)
+
 		if err != nil {
 			fmt.Printf("Failed to update HPA %s: %v\n", hpa.Name, err)
 
@@ -130,6 +102,63 @@ func (program *Hpa) Run(options *Options) error {
 	}
 
 	return errors.Join(listErrors...)
+}
+
+func (program *Hpa) printHPAs(hpas []v1.HorizontalPodAutoscaler) {
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.SetStyle(table.StyleLight)
+	t.Style().Options.DrawBorder = false
+	t.Style().Options.SeparateRows = false
+	t.Style().Options.SeparateColumns = false
+	t.Style().Options.SeparateHeader = false
+
+	t.AppendHeader(table.Row{"NAME", "REFERENCE", "CPU", "TARGET", "MINPODS", "MIN%", "MAXPODS", "REPLICAS", "REP%", "Graphical Scale"})
+	for _, hpa := range hpas {
+		cpu := "?"
+		if hpa.Status.CurrentCPUUtilizationPercentage != nil {
+			cpu = fmt.Sprint(*hpa.Status.CurrentCPUUtilizationPercentage, "%")
+		}
+		t.AppendRow(table.Row{
+			hpa.Name,
+			hpa.Spec.ScaleTargetRef.Kind + "/" + hpa.Spec.ScaleTargetRef.Name,
+			cpu,
+			fmt.Sprint(*hpa.Spec.TargetCPUUtilizationPercentage, "%"),
+			*hpa.Spec.MinReplicas,
+			fmt.Sprintf("%3d%%",
+				int(float64(*hpa.Spec.MinReplicas)/float64(hpa.Spec.MaxReplicas)*100)),
+			hpa.Spec.MaxReplicas,
+			hpa.Status.CurrentReplicas,
+			fmt.Sprintf("%3d%%",
+				int(float64(hpa.Status.CurrentReplicas)/float64(hpa.Spec.MaxReplicas)*100)),
+			formatGraphicalPercentage(hpa.Status.CurrentReplicas, *hpa.Spec.MinReplicas, hpa.Spec.MaxReplicas),
+		})
+
+	}
+	t.Render()
+}
+
+var field = strings.Repeat("-", 30)
+var spaces = strings.Repeat(" ", len(field))
+
+// formatGraphicalPercentage draws a text representation of the percentage, like >   |----X----|<
+func formatGraphicalPercentage(current int32, min int32, max int32) string {
+
+	scale := float64(len(field))
+	leading := float64(min) / float64(max)
+	mark := float64(current) / float64(max)
+
+	ls := int(leading * scale)
+	ms := int(mark*scale) - ls
+	ts := int(scale) - ms - ls
+
+	return "|" +
+		spaces[0:ls] +
+		field[0:ms] +
+		"X" +
+		field[0:ts] +
+		"|"
+
 }
 
 func (program *Hpa) getHpas(err error, clientset *kubernetes.Clientset, ctx context.Context) ([]v1.HorizontalPodAutoscaler, error) {
