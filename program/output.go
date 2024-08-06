@@ -99,7 +99,9 @@ func formatMarks(min, max int32, marks ...Mark) string {
 
 	chars := int(scale) - builder.Len()
 
-	builder.WriteString(field[0:chars])
+	if chars > 0 {
+		builder.WriteString(field[0:chars])
+	}
 	builder.WriteString("| ")
 	if marks[len(marks)-1] == Max {
 		builder.WriteString(fmt.Sprint(max))
